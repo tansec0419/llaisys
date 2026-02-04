@@ -132,7 +132,7 @@ def test_hf_model(tokenizer, model, prompt="Who are you?", max_tokens=128):
 
 
 def download_model_if_needed():
-    """下载模型（如果不存在）"""
+    """下载模型（如果不存在）- 移除所有 emoji"""
     from transformers import AutoTokenizer, AutoModelForCausalLM
     
     model_name = "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B"
@@ -141,7 +141,7 @@ def download_model_if_needed():
     try:
         # Try to load tokenizer (lightweight check)
         tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
-        print(f"✅ Model found in cache")
+        print("[OK] Model found in cache")
         
         # Get the actual cache path
         cache_dir = Path.home() / ".cache" / "huggingface" / "hub"
@@ -163,7 +163,7 @@ def download_model_if_needed():
                 device_map="cpu",
                 trust_remote_code=True,
             )
-            print(f"✅ Model downloaded successfully")
+            print("[OK] Model downloaded successfully")
             
             # Get the cache path
             cache_dir = Path.home() / ".cache" / "huggingface" / "hub"
@@ -174,7 +174,7 @@ def download_model_if_needed():
             return model_name
             
         except Exception as download_error:
-            print(f"❌ Failed to download model: {download_error}")
+            print(f"[ERROR] Failed to download model: {download_error}")
             return None
 
 
@@ -267,17 +267,17 @@ def main():
                 # Show first difference
                 for i in range(min_len):
                     if llaisys_ids[i] != hf_ids[i]:
-                        print(f"\n⚠️ First difference at position {i}:")
+                        print(f"\n[!] First difference at position {i}:")
                         print(f"  LLAISYS: {llaisys_ids[max(0,i-2):i+3]}")
                         print(f"  HF:      {hf_ids[max(0,i-2):i+3]}")
                         sys.exit(1)  # Fail test if mismatch
                 else:
-                    print("\n✅ All tokens match!")
+                    print("\n[OK] All tokens match!")
             except Exception as e:
                 print(f"Warning: Could not test HuggingFace model: {e}")
                 print("Continuing with LLAISYS-only test...")
     
-    print("\n✅ Test completed!")
+    print("\n[OK] Test completed!")
 
 
 if __name__ == "__main__":
