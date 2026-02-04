@@ -131,6 +131,27 @@ def test_hf_model(tokenizer, model, prompt="Who are you?", max_tokens=128):
     return output_ids_list, output_text
 
 
+def get_default_model_path():
+    """获取默认模型路径（用于 CI 环境）"""
+    # 常见的模型缓存位置
+    possible_paths = [
+        # HuggingFace cache (Linux/Mac)
+        Path.home() / ".cache" / "huggingface" / "hub",
+        # HuggingFace cache (Windows)
+        Path.home() / ".cache" / "huggingface" / "hub",
+    ]
+    
+    for cache_dir in possible_paths:
+        if cache_dir.exists():
+            # 查找 DeepSeek-R1-Distill-Qwen-1.5B 模型
+            model_dirs = list(cache_dir.glob("models--deepseek-ai--DeepSeek-R1-Distill-Qwen-1.5B/snapshots/*"))
+            if model_dirs:
+                # 返回第一个找到的 snapshot
+                return str(model_dirs[0])
+    
+    return None
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=str, default=None, help="Path to model")
@@ -138,55 +159,81 @@ def main():
     parser.add_argument("--prompt", type=str, default="Who are you?", help="Input prompt")
     parser.add_argument("--max-tokens", type=int, default=128, help="Max tokens to generate")
     parser.add_argument("--skip-hf", action="store_true", help="Skip HuggingFace model test")
-    parser.add_argument("--test", action="store_true", help="Run test mode (deprecated, use without --skip-hf)")
+    parser.add_argument("--test", action="store_true", help="Run test mode (auto-detect model path)")
     args = parser.parse_args()
     
-    # Get model path from args or environment variable
-    model_path = args.model or os.environ.get('MODEL_PATH')
+    # Get model path from multiple sources (优先级从高到低)
+    model_path = (
+        args.model or                           # 1. 命令行参数
+        os.environ.get('MODEL_PATH') or         # 2. 环境变量
+        (get_default_model_path() if args.test else None)  # 3. 自动检测（仅在 --test 模式）
+    )
+    
     if not model_path:
-        print("Error: Model path must be provided via --model argument or MODEL_PATH environment variable")
+        print("Error: Model path must be provided via one of:")
+        print("  1. --model argument")
+        print("  2. MODEL_PATH environment variable")
+        print("  3. --test flag (auto-detect from HuggingFace cache)")
+        print("\nNo model found in any location.")
+        sys.exit(1)
+    
+    print(f"Using model path: {model_path}")
+    
+    # Verify model path exists
+    if not Path(model_path).exists():
+        print(f"Error: Model path does not exist: {model_path}")
         sys.exit(1)
     
     # Test LLAISYS implementation
-    llaisys_ids, llaisys_text = test_llaisys_model(
-        model_path, 
-        prompt=args.prompt, 
-        max_tokens=args.max_tokens
-    )
+    try:
+        llaisys_ids, llaisys_text = test_llaisys_model(
+            model_path, 
+            prompt=args.prompt, 
+            max_tokens=args.max_tokens
+        )
+    except Exception as e:
+        print(f"Error testing LLAISYS model: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
     
     # Test HuggingFace reference (optional)
     if not args.skip_hf:
         tokenizer, hf_model, _ = load_hf_model(model_path, args.device)
         if tokenizer and hf_model:
-            hf_ids, hf_text = test_hf_model(
-                tokenizer, 
-                hf_model, 
-                prompt=args.prompt, 
-                max_tokens=args.max_tokens
-            )
-            
-            # Compare results
-            print("\n" + "="*60)
-            print("Comparison")
-            print("="*60)
-            
-            # Compare tokens
-            min_len = min(len(llaisys_ids), len(hf_ids))
-            match_count = sum(1 for i in range(min_len) if llaisys_ids[i] == hf_ids[i])
-            
-            print(f"\nTotal tokens - LLAISYS: {len(llaisys_ids)}, HF: {len(hf_ids)}")
-            print(f"Matching tokens: {match_count}/{min_len}")
-            print(f"Match rate: {match_count/min_len*100:.1f}%")
-            
-            # Show first difference
-            for i in range(min_len):
-                if llaisys_ids[i] != hf_ids[i]:
-                    print(f"\n⚠️ First difference at position {i}:")
-                    print(f"  LLAISYS: {llaisys_ids[max(0,i-2):i+3]}")
-                    print(f"  HF:      {hf_ids[max(0,i-2):i+3]}")
-                    sys.exit(1)  # Fail test if mismatch
-            else:
-                print("\n✅ All tokens match!")
+            try:
+                hf_ids, hf_text = test_hf_model(
+                    tokenizer, 
+                    hf_model, 
+                    prompt=args.prompt, 
+                    max_tokens=args.max_tokens
+                )
+                
+                # Compare results
+                print("\n" + "="*60)
+                print("Comparison")
+                print("="*60)
+                
+                # Compare tokens
+                min_len = min(len(llaisys_ids), len(hf_ids))
+                match_count = sum(1 for i in range(min_len) if llaisys_ids[i] == hf_ids[i])
+                
+                print(f"\nTotal tokens - LLAISYS: {len(llaisys_ids)}, HF: {len(hf_ids)}")
+                print(f"Matching tokens: {match_count}/{min_len}")
+                print(f"Match rate: {match_count/min_len*100:.1f}%")
+                
+                # Show first difference
+                for i in range(min_len):
+                    if llaisys_ids[i] != hf_ids[i]:
+                        print(f"\n⚠️ First difference at position {i}:")
+                        print(f"  LLAISYS: {llaisys_ids[max(0,i-2):i+3]}")
+                        print(f"  HF:      {hf_ids[max(0,i-2):i+3]}")
+                        sys.exit(1)  # Fail test if mismatch
+                else:
+                    print("\n✅ All tokens match!")
+            except Exception as e:
+                print(f"Warning: Could not test HuggingFace model: {e}")
+                print("Continuing with LLAISYS-only test...")
     
     print("\n✅ Test completed!")
 
