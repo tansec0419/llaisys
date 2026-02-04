@@ -131,25 +131,67 @@ def test_hf_model(tokenizer, model, prompt="Who are you?", max_tokens=128):
     return output_ids_list, output_text
 
 
-def get_default_model_path():
-    """获取默认模型路径（用于 CI 环境）"""
-    # 常见的模型缓存位置
-    possible_paths = [
-        # HuggingFace cache (Linux/Mac)
-        Path.home() / ".cache" / "huggingface" / "hub",
-        # HuggingFace cache (Windows)
-        Path.home() / ".cache" / "huggingface" / "hub",
-    ]
+def download_model_if_needed():
+    """下载模型（如果不存在）"""
+    from transformers import AutoTokenizer, AutoModelForCausalLM
     
-    for cache_dir in possible_paths:
-        if cache_dir.exists():
-            # 查找 DeepSeek-R1-Distill-Qwen-1.5B 模型
+    model_name = "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B"
+    print(f"Checking if model {model_name} is cached...")
+    
+    try:
+        # Try to load tokenizer (lightweight check)
+        tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+        print(f"✅ Model found in cache")
+        
+        # Get the actual cache path
+        cache_dir = Path.home() / ".cache" / "huggingface" / "hub"
+        model_dirs = list(cache_dir.glob("models--deepseek-ai--DeepSeek-R1-Distill-Qwen-1.5B/snapshots/*"))
+        if model_dirs:
+            return str(model_dirs[0])
+        
+        # Fallback: return model name for transformers to handle
+        return model_name
+        
+    except Exception as e:
+        print(f"Model not found in cache, downloading... (this may take a while)")
+        try:
+            # Download tokenizer and model
+            tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+            model = AutoModelForCausalLM.from_pretrained(
+                model_name,
+                torch_dtype="auto",
+                device_map="cpu",
+                trust_remote_code=True,
+            )
+            print(f"✅ Model downloaded successfully")
+            
+            # Get the cache path
+            cache_dir = Path.home() / ".cache" / "huggingface" / "hub"
             model_dirs = list(cache_dir.glob("models--deepseek-ai--DeepSeek-R1-Distill-Qwen-1.5B/snapshots/*"))
             if model_dirs:
-                # 返回第一个找到的 snapshot
                 return str(model_dirs[0])
+            
+            return model_name
+            
+        except Exception as download_error:
+            print(f"❌ Failed to download model: {download_error}")
+            return None
+
+
+def get_default_model_path():
+    """获取默认模型路径（用于 CI 环境）"""
+    # 先检查缓存
+    cache_dir = Path.home() / ".cache" / "huggingface" / "hub"
     
-    return None
+    if cache_dir.exists():
+        # 查找 DeepSeek-R1-Distill-Qwen-1.5B 模型
+        model_dirs = list(cache_dir.glob("models--deepseek-ai--DeepSeek-R1-Distill-Qwen-1.5B/snapshots/*"))
+        if model_dirs:
+            return str(model_dirs[0])
+    
+    # 如果缓存中没有，尝试下载
+    print("Model not found in cache, attempting to download...")
+    return download_model_if_needed()
 
 
 def main():
@@ -159,28 +201,28 @@ def main():
     parser.add_argument("--prompt", type=str, default="Who are you?", help="Input prompt")
     parser.add_argument("--max-tokens", type=int, default=128, help="Max tokens to generate")
     parser.add_argument("--skip-hf", action="store_true", help="Skip HuggingFace model test")
-    parser.add_argument("--test", action="store_true", help="Run test mode (auto-detect model path)")
+    parser.add_argument("--test", action="store_true", help="Run test mode (auto-detect/download model)")
     args = parser.parse_args()
     
     # Get model path from multiple sources (优先级从高到低)
     model_path = (
         args.model or                           # 1. 命令行参数
         os.environ.get('MODEL_PATH') or         # 2. 环境变量
-        (get_default_model_path() if args.test else None)  # 3. 自动检测（仅在 --test 模式）
+        (get_default_model_path() if args.test else None)  # 3. 自动检测/下载（仅在 --test 模式）
     )
     
     if not model_path:
         print("Error: Model path must be provided via one of:")
         print("  1. --model argument")
         print("  2. MODEL_PATH environment variable")
-        print("  3. --test flag (auto-detect from HuggingFace cache)")
+        print("  3. --test flag (auto-detect/download from HuggingFace)")
         print("\nNo model found in any location.")
         sys.exit(1)
     
     print(f"Using model path: {model_path}")
     
-    # Verify model path exists
-    if not Path(model_path).exists():
+    # Verify model path exists (skip for model names like "deepseek-ai/...")
+    if not model_path.startswith("deepseek-ai/") and not Path(model_path).exists():
         print(f"Error: Model path does not exist: {model_path}")
         sys.exit(1)
     
