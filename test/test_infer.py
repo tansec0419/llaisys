@@ -178,9 +178,9 @@ def main():
                     print(f"  HF:      {hf_ids[max(0,i-2):i+3]}")
                     break
             else:
-                print("\n✅ All tokens match!")
+                print("\n✅ All tokens match")
     
-    print("\n✅ Test completed!")
+    print("\n✅ Test completed")
 
 
 if __name__ == "__main__":
