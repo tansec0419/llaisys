@@ -165,17 +165,16 @@ void Tensor::debug() const {
 
 // 1.2
 bool Tensor::isContiguous() const {
-    // TO_BE_IMPLEMENTED();
     if (_meta.shape.empty()) {
         return true;
     }
 
-    // 计算期望的连续步长
+    // 计算期望的连续步长 - 修复 Windows 警告
     std::vector<ptrdiff_t> expected_strides(_meta.shape.size());
     ptrdiff_t stride = 1;
-    for (int i = _meta.shape.size() - 1; i >= 0; --i) {
+    for (int i = static_cast<int>(_meta.shape.size()) - 1; i >= 0; --i) {
         expected_strides[i] = stride;
-        stride *= _meta.shape[i];
+        stride *= static_cast<ptrdiff_t>(_meta.shape[i]);
     }
 
     // 比较实际步长和期望步长
@@ -222,7 +221,7 @@ tensor_t Tensor::permute(const std::vector<size_t> &order) const {
 
 // 1.3
 tensor_t Tensor::view(const std::vector<size_t> &shape) const {
-    //  检查新形状的元素总数是否匹配
+    // 检查新形状的元素总数是否匹配
     size_t new_numel = 1;
     for (auto s : shape) {
         new_numel *= s;
@@ -237,12 +236,12 @@ tensor_t Tensor::view(const std::vector<size_t> &shape) const {
         throw std::runtime_error("view: tensor must be contiguous");
     }
 
-    // 计算新的步长
+    // 计算新的步长 - 修复 Windows 警告
     std::vector<ptrdiff_t> new_strides(shape.size());
     ptrdiff_t stride = 1;
-    for (int i = shape.size() - 1; i >= 0; --i) {
+    for (int i = static_cast<int>(shape.size()) - 1; i >= 0; --i) {
         new_strides[i] = stride;
-        stride *= shape[i];
+        stride *= static_cast<ptrdiff_t>(shape[i]);
     }
 
     // 创建新的元数据
@@ -273,7 +272,7 @@ tensor_t Tensor::slice(size_t dim, size_t start, size_t end) const {
     std::vector<ptrdiff_t> new_strides = _meta.strides;
 
     // 计算新的偏移量
-    size_t new_offset = _offset + start * _meta.strides[dim] * elementSize();
+    size_t new_offset = _offset + start * static_cast<size_t>(_meta.strides[dim]) * elementSize();
 
     // 创建新的元数据
     TensorMeta new_meta;

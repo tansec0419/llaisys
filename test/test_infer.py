@@ -1,6 +1,7 @@
 import argparse
 import sys
 import time
+import os
 from pathlib import Path
 
 # 添加项目根目录到 Python 路径
@@ -132,23 +133,30 @@ def test_hf_model(tokenizer, model, prompt="Who are you?", max_tokens=128):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", type=str, required=True, help="Path to model")
+    parser.add_argument("--model", type=str, default=None, help="Path to model")
     parser.add_argument("--device", type=str, default="cpu", choices=["cpu", "cuda"])
     parser.add_argument("--prompt", type=str, default="Who are you?", help="Input prompt")
     parser.add_argument("--max-tokens", type=int, default=128, help="Max tokens to generate")
     parser.add_argument("--skip-hf", action="store_true", help="Skip HuggingFace model test")
+    parser.add_argument("--test", action="store_true", help="Run test mode (deprecated, use without --skip-hf)")
     args = parser.parse_args()
+    
+    # Get model path from args or environment variable
+    model_path = args.model or os.environ.get('MODEL_PATH')
+    if not model_path:
+        print("Error: Model path must be provided via --model argument or MODEL_PATH environment variable")
+        sys.exit(1)
     
     # Test LLAISYS implementation
     llaisys_ids, llaisys_text = test_llaisys_model(
-        args.model, 
+        model_path, 
         prompt=args.prompt, 
         max_tokens=args.max_tokens
     )
     
     # Test HuggingFace reference (optional)
     if not args.skip_hf:
-        tokenizer, hf_model, model_path = load_hf_model(args.model, args.device)
+        tokenizer, hf_model, _ = load_hf_model(model_path, args.device)
         if tokenizer and hf_model:
             hf_ids, hf_text = test_hf_model(
                 tokenizer, 
@@ -176,11 +184,11 @@ def main():
                     print(f"\n⚠️ First difference at position {i}:")
                     print(f"  LLAISYS: {llaisys_ids[max(0,i-2):i+3]}")
                     print(f"  HF:      {hf_ids[max(0,i-2):i+3]}")
-                    break
+                    sys.exit(1)  # Fail test if mismatch
             else:
-                print("\n✅ All tokens match")
+                print("\n✅ All tokens match!")
     
-    print("\n✅ Test completed")
+    print("\n✅ Test completed!")
 
 
 if __name__ == "__main__":
