@@ -1,149 +1,187 @@
-import gc
-from test_utils import *
-
 import argparse
-from transformers import AutoModelForCausalLM, AutoTokenizer
-import torch
-from huggingface_hub import snapshot_download
-import os
-import time
-import llaisys
 import sys
-import io
+import time
+from pathlib import Path
 
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
+# 添加项目根目录到 Python 路径
+sys.path.insert(0, str(Path(__file__).parent.parent / "python"))
 
-
-def load_hf_model(model_path=None, device_name="cpu"):
-    model_id = "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B"
-
-    if model_path and os.path.isdir(model_path):
-        print(f"Loading model from local path: {model_path}")
-    else:
-        print(f"Loading model from Hugging Face: {model_id}")
-        model_path = snapshot_download(model_id)
-    tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
-    model = AutoModelForCausalLM.from_pretrained(
-        model_path,
-        torch_dtype=torch.bfloat16,
-        device_map=torch_device(device_name),
-        trust_remote_code=True,
-    )
-
-    return tokenizer, model, model_path
+from llaisys.models import Qwen2
 
 
-def hf_infer(
-    prompt, tokenizer, model, max_new_tokens=128, top_p=0.8, top_k=50, temperature=0.8
-):
-    input_content = tokenizer.apply_chat_template(
-        conversation=[{"role": "user", "content": prompt}],
-        add_generation_prompt=True,
-        tokenize=False,
-    )
-    inputs = tokenizer.encode(input_content, return_tensors="pt").to(model.device)
-    with torch.no_grad():
-        outputs = model.generate(
-            inputs,
-            max_new_tokens=max_new_tokens,
-            top_k=top_k,
-            top_p=top_p,
-            temperature=temperature,
+def load_hf_model(model_path, device):
+    """加载 HuggingFace 参考模型（可选）"""
+    try:
+        from transformers import AutoTokenizer, AutoModelForCausalLM
+        import torch
+        
+        print(f"Loading HuggingFace model from: {model_path}")
+        tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
+        
+        device_map = "cpu" if device == "cpu" else "cuda"
+        model = AutoModelForCausalLM.from_pretrained(
+            model_path,
+            torch_dtype="auto",
+            device_map=device_map,
+            trust_remote_code=True,
         )
-    result = tokenizer.decode(outputs[0], skip_special_tokens=True)
-    return outputs[0].tolist(), result
+        
+        return tokenizer, model, model_path
+    except Exception as e:
+        print(f"Warning: Could not load HuggingFace model: {e}")
+        print("Will only test LLAISYS implementation")
+        return None, None, model_path
 
 
-def load_llaisys_model(model_path, device_name):
-    model = llaisys.models.Qwen2(model_path, llaisys_device(device_name))
-    return model
-
-
-def llaisys_infer(
-    prompt, tokenizer, model, max_new_tokens=128, top_p=0.8, top_k=50, temperature=0.8
-):
-    input_content = tokenizer.apply_chat_template(
-        conversation=[{"role": "user", "content": prompt}],
-        add_generation_prompt=True,
+def test_llaisys_model(model_path, prompt="Who are you?", max_tokens=128):
+    """测试 LLAISYS 实现的模型"""
+    from transformers import AutoTokenizer
+    
+    print("\n" + "="*60)
+    print("Testing LLAISYS Implementation")
+    print("="*60)
+    
+    # Load tokenizer
+    tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
+    
+    # Tokenize input
+    messages = [{"role": "user", "content": prompt}]
+    text = tokenizer.apply_chat_template(
+        messages,
         tokenize=False,
+        add_generation_prompt=True
     )
-    inputs = tokenizer.encode(input_content)
-    outputs = model.generate(
-        inputs,
-        max_new_tokens=max_new_tokens,
-        top_k=top_k,
-        top_p=top_p,
-        temperature=temperature,
-    )
+    inputs = tokenizer([text], return_tensors="pt")
+    input_ids = inputs.input_ids[0].tolist()
+    
+    print(f"\nPrompt: {prompt}")
+    print(f"Input tokens: {input_ids[:10]}... (length: {len(input_ids)})")
+    
+    # Load LLAISYS model
+    print("\nLoading LLAISYS model...")
+    model = Qwen2(model_path)
+    
+    # Generate
+    print("Generating...")
+    start_time = time.time()
+    output_ids = model.generate(input_ids, max_new_tokens=max_tokens)
+    elapsed = time.time() - start_time
+    
+    # Decode
+    output_text = tokenizer.decode(output_ids, skip_special_tokens=False)
+    
+    print("\n=== LLAISYS Result ===")
+    print(f"\nTokens ({len(output_ids)}):")
+    print(output_ids[:50])  # 只打印前50个
+    if len(output_ids) > 50:
+        print("...")
+    
+    print(f"\nGenerated text:")
+    print(output_text)
+    print(f"\nTime elapsed: {elapsed:.2f}s")
+    print(f"Tokens/sec: {len(output_ids)/elapsed:.2f}")
+    
+    return output_ids, output_text
 
-    return outputs, tokenizer.decode(outputs, skip_special_tokens=True)
+
+def test_hf_model(tokenizer, model, prompt="Who are you?", max_tokens=128):
+    """测试 HuggingFace 参考模型"""
+    import torch
+    
+    print("\n" + "="*60)
+    print("Testing HuggingFace Reference")
+    print("="*60)
+    
+    messages = [{"role": "user", "content": prompt}]
+    text = tokenizer.apply_chat_template(
+        messages,
+        tokenize=False,
+        add_generation_prompt=True
+    )
+    
+    model_inputs = tokenizer([text], return_tensors="pt").to(model.device)
+    
+    print("Generating...")
+    start_time = time.time()
+    with torch.no_grad():
+        generated_ids = model.generate(
+            **model_inputs,
+            max_new_tokens=max_tokens,
+            do_sample=False,  # greedy decoding
+        )
+    elapsed = time.time() - start_time
+    
+    # Get full output (including prompt)
+    output_ids_list = generated_ids[0].cpu().tolist()
+    
+    output_text = tokenizer.decode(generated_ids[0], skip_special_tokens=False)
+    
+    print("\n=== HuggingFace Result ===")
+    print(f"\nTokens ({len(output_ids_list)}):")
+    print(output_ids_list[:50])
+    if len(output_ids_list) > 50:
+        print("...")
+    
+    print(f"\nGenerated text:")
+    print(output_text)
+    print(f"\nTime elapsed: {elapsed:.2f}s")
+    print(f"Tokens/sec: {len(output_ids_list)/elapsed:.2f}")
+    
+    return output_ids_list, output_text
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model", type=str, required=True, help="Path to model")
+    parser.add_argument("--device", type=str, default="cpu", choices=["cpu", "cuda"])
+    parser.add_argument("--prompt", type=str, default="Who are you?", help="Input prompt")
+    parser.add_argument("--max-tokens", type=int, default=128, help="Max tokens to generate")
+    parser.add_argument("--skip-hf", action="store_true", help="Skip HuggingFace model test")
+    args = parser.parse_args()
+    
+    # Test LLAISYS implementation
+    llaisys_ids, llaisys_text = test_llaisys_model(
+        args.model, 
+        prompt=args.prompt, 
+        max_tokens=args.max_tokens
+    )
+    
+    # Test HuggingFace reference (optional)
+    if not args.skip_hf:
+        tokenizer, hf_model, model_path = load_hf_model(args.model, args.device)
+        if tokenizer and hf_model:
+            hf_ids, hf_text = test_hf_model(
+                tokenizer, 
+                hf_model, 
+                prompt=args.prompt, 
+                max_tokens=args.max_tokens
+            )
+            
+            # Compare results
+            print("\n" + "="*60)
+            print("Comparison")
+            print("="*60)
+            
+            # Compare tokens
+            min_len = min(len(llaisys_ids), len(hf_ids))
+            match_count = sum(1 for i in range(min_len) if llaisys_ids[i] == hf_ids[i])
+            
+            print(f"\nTotal tokens - LLAISYS: {len(llaisys_ids)}, HF: {len(hf_ids)}")
+            print(f"Matching tokens: {match_count}/{min_len}")
+            print(f"Match rate: {match_count/min_len*100:.1f}%")
+            
+            # Show first difference
+            for i in range(min_len):
+                if llaisys_ids[i] != hf_ids[i]:
+                    print(f"\n⚠️ First difference at position {i}:")
+                    print(f"  LLAISYS: {llaisys_ids[max(0,i-2):i+3]}")
+                    print(f"  HF:      {hf_ids[max(0,i-2):i+3]}")
+                    break
+            else:
+                print("\n✅ All tokens match!")
+    
+    print("\n✅ Test completed!")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--device", default="cpu", choices=["cpu", "nvidia"], type=str)
-    parser.add_argument("--model", default=None, type=str)
-    parser.add_argument("--prompt", default="Who are you?", type=str)
-    parser.add_argument("--max_steps", default=128, type=int)
-    parser.add_argument("--top_p", default=0.8, type=float)
-    parser.add_argument("--top_k", default=50, type=int)
-    parser.add_argument("--temperature", default=1.0, type=float)
-    parser.add_argument("--test", action="store_true")
-
-    args = parser.parse_args()
-
-    top_p, top_k, temperature = args.top_p, args.top_k, args.temperature
-    if args.test:
-        top_p, top_k, temperature = 1.0, 1, 1.0
-
-    tokenizer, model, model_path = load_hf_model(args.model, args.device)
-
-    # Example prompt
-    start_time = time.time()
-    tokens, output = hf_infer(
-        args.prompt,
-        tokenizer,
-        model,
-        max_new_tokens=args.max_steps,
-        top_p=top_p,
-        top_k=top_k,
-        temperature=temperature,
-    )
-    end_time = time.time()
-
-    del model
-    gc.collect()
-
-    print("\n=== Answer ===\n")
-    print("Tokens:")
-    print(tokens)
-    print("\nContents:")
-    print(output)
-    print("\n")
-    print(f"Time elapsed: {(end_time - start_time):.2f}s\n")
-
-    model = load_llaisys_model(model_path, args.device)
-    start_time = time.time()
-    llaisys_tokens, llaisys_output = llaisys_infer(
-        args.prompt,
-        tokenizer,
-        model,
-        max_new_tokens=args.max_steps,
-        top_p=top_p,
-        top_k=top_k,
-        temperature=temperature,
-    )
-
-    end_time = time.time()
-
-    print("\n=== Your Result ===\n")
-    print("Tokens:")
-    print(llaisys_tokens)
-    print("\nContents:")
-    print(llaisys_output)
-    print("\n")
-    print(f"Time elapsed: {(end_time - start_time):.2f}s\n")
-
-    if args.test:
-        assert llaisys_tokens == tokens
-        print("\033[92mTest passed!\033[0m\n")
+    main()

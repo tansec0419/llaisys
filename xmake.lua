@@ -108,6 +108,14 @@ target("llaisys")
     add_files("src/llaisys/*.cc")
     set_installdir(".")
 
+    add_includedirs("include")
+    add_files("src/tensor/*.cpp")
+    add_files("src/core/**/*.cpp")
+    add_files("src/device/*.cpp")
+    add_files("src/ops/**/*.cpp")
+    add_files("src/utils/*.cpp")
+    add_files("src/models/**/*.cpp")
+
     
     after_install(function (target)
         -- copy shared library to python package
