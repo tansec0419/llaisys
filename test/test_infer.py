@@ -2,8 +2,13 @@ import argparse
 import sys
 import time
 import os
+import io
 from pathlib import Path
 
+# 强制将标准输出的编码设置为 utf-8
+if sys.platform == 'win32':
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+    
 # 添加项目根目录到 Python 路径
 sys.path.insert(0, str(Path(__file__).parent.parent / "python"))
 
