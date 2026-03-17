@@ -131,31 +131,76 @@ def test_hf_model(tokenizer, model, prompt="Who are you?", max_tokens=128):
     return output_ids_list, output_text
 
 
+# def download_model_if_needed():
+#     """下载模型（如果不存在）- 移除所有 emoji"""
+#     from transformers import AutoTokenizer, AutoModelForCausalLM
+    
+#     model_name = "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B"
+#     print(f"Checking if model {model_name} is cached...")
+    
+#     try:
+#         # Try to load tokenizer (lightweight check)
+#         tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+#         print("[OK] Model found in cache")
+        
+#         # Get the actual cache path
+#         cache_dir = Path.home() / ".cache" / "huggingface" / "hub"
+#         model_dirs = list(cache_dir.glob("models--deepseek-ai--DeepSeek-R1-Distill-Qwen-1.5B/snapshots/*"))
+#         if model_dirs:
+#             return str(model_dirs[0])
+        
+#         # Fallback: return model name for transformers to handle
+#         return model_name
+        
+#     except Exception as e:
+#         print(f"Model not found in cache, downloading... (this may take a while)")
+#         try:
+#             # Download tokenizer and model
+#             tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+#             model = AutoModelForCausalLM.from_pretrained(
+#                 model_name,
+#                 torch_dtype="auto",
+#                 device_map="cpu",
+#                 trust_remote_code=True,
+#             )
+#             print("[OK] Model downloaded successfully")
+            
+#             # Get the cache path
+#             cache_dir = Path.home() / ".cache" / "huggingface" / "hub"
+#             model_dirs = list(cache_dir.glob("models--deepseek-ai--DeepSeek-R1-Distill-Qwen-1.5B/snapshots/*"))
+#             if model_dirs:
+#                 return str(model_dirs[0])
+            
+#             return model_name
+            
+#         except Exception as download_error:
+#             print(f"[ERROR] Failed to download model: {download_error}")
+#             return None
+
 def download_model_if_needed():
     """下载模型（如果不存在）- 移除所有 emoji"""
     from transformers import AutoTokenizer, AutoModelForCausalLM
+    from pathlib import Path
     
     model_name = "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B"
     print(f"Checking if model {model_name} is cached...")
     
-    try:
-        # Try to load tokenizer (lightweight check)
-        tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
-        print("[OK] Model found in cache")
-        
-        # Get the actual cache path
-        cache_dir = Path.home() / ".cache" / "huggingface" / "hub"
-        model_dirs = list(cache_dir.glob("models--deepseek-ai--DeepSeek-R1-Distill-Qwen-1.5B/snapshots/*"))
-        if model_dirs:
-            return str(model_dirs[0])
-        
-        # Fallback: return model name for transformers to handle
-        return model_name
-        
-    except Exception as e:
+    cache_dir = Path.home() / ".cache" / "huggingface" / "hub"
+    model_dirs = list(cache_dir.glob("models--deepseek-ai--DeepSeek-R1-Distill-Qwen-1.5B/snapshots/*"))
+    
+    # 严格检查：快照目录中必须包含 safetensors 权重文件才算真正缓存完毕
+    has_weights = False
+    if model_dirs:
+        for d in model_dirs:
+            if list(d.glob("*.safetensors")):
+                print("[OK] Model found in cache")
+                has_weights = True
+                return str(d)
+                
+    if not has_weights:
         print(f"Model not found in cache, downloading... (this may take a while)")
         try:
-            # Download tokenizer and model
+            # 同时下载 Tokenizer 和 Model 权重
             tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
             model = AutoModelForCausalLM.from_pretrained(
                 model_name,
@@ -165,18 +210,17 @@ def download_model_if_needed():
             )
             print("[OK] Model downloaded successfully")
             
-            # Get the cache path
-            cache_dir = Path.home() / ".cache" / "huggingface" / "hub"
+            # 重新获取最新的缓存路径
             model_dirs = list(cache_dir.glob("models--deepseek-ai--DeepSeek-R1-Distill-Qwen-1.5B/snapshots/*"))
-            if model_dirs:
-                return str(model_dirs[0])
+            for d in model_dirs:
+                if list(d.glob("*.safetensors")):
+                    return str(d)
             
             return model_name
             
         except Exception as download_error:
             print(f"[ERROR] Failed to download model: {download_error}")
             return None
-
 
 def get_default_model_path():
     """获取默认模型路径（用于 CI 环境）"""
